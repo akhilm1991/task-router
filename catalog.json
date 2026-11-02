@@ -1,0 +1,16 @@
+{
+  "models": [
+    {"id": "claude-haiku-5-5", "provider": "anthropic", "status": "active", "note": "Cheapest and fastest Claude. Small, mechanical, well-specified edits."},
+    {"id": "claude-sonnet-5-5", "provider": "anthropic", "status": "active", "note": "Everyday Claude. Clear features and fixes."},
+    {"id": "claude-opus-5-5", "provider": "anthropic", "status": "active", "note": "Strong Claude. Large multi-file changes, unclear design, high-stakes work."},
+    {"id": "claude-fable-5-1", "provider": "anthropic", "status": "active", "note": "Top Claude and the dearest. Only the hardest work."},
+    {"id": "gpt-6-luna", "provider": "openai", "status": "active", "note": "Vendor: fast and affordable, for easier tasks. Bulk mechanical work."},
+    {"id": "gpt-6.1-terra", "provider": "openai", "status": "active", "note": "Balanced Codex tier. Vendor gives no detail."},
+    {"id": "gpt-6.1-sol", "provider": "openai", "status": "active", "note": "Vendor: workhorse for coding and everyday work. Deep tracing, audits, second opinions."},
+    {"id": "gpt-6-astra", "provider": "openai", "status": "active", "note": "Vendor: frontier, for the most demanding work."},
+    {"id": "gpt-6-sol", "provider": "openai", "status": "trial", "note": "Vendor: previous generation."},
+    {"id": "gpt-5.6-sol", "provider": "openai", "status": "trial", "note": "Vendor: older generation."},
+    {"id": "gpt-5.6-terra", "provider": "openai", "status": "trial", "note": "Vendor: older, for straightforward work."},
+    {"id": "gpt-5.6-luna", "provider": "openai", "status": "trial", "note": "Vendor: older, fast and efficient."}
+  ]
+}

@@ -1,0 +1,574 @@
+#!/usr/bin/env python3
+"""task-router: start a task in a new Claude or Codex session on a chosen model.
+
+The thinking lives in skills/route/SKILL.md. This file only does what must not
+depend on a model's judgement: the catalog, the hard limits, launching and logging.
+"""
+import argparse
+import concurrent.futures as futures
+import datetime as dt
+import json
+import os
+import pathlib
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+import uuid
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+CATALOG = ROOT / "catalog.json"
+CONFIG = pathlib.Path(os.environ.get("TASK_ROUTER_CONFIG", "~/.config/task-router")).expanduser()
+STATE = pathlib.Path(os.environ.get("TASK_ROUTER_STATE", "~/.local/state/task-router")).expanduser()
+LOCAL_CATALOG = CONFIG / "catalog.local.json"
+LOG = STATE / "routes.jsonl"
+SKILL = ROOT / "skills" / "route" / "SKILL.md"
+CASES = ROOT / "evals" / "cases.json"
+REMOVED = ROOT / "evals" / "removed.json"
+REPORTS = STATE / "reports"  # runs hold costs and replies, so they stay out of the repo
+
+CLAUDE_MODELS_URL = "https://platform.claude.com/docs/en/models/overview"
+CLAUDE_ID = re.compile(r"\bclaude-(?:fable|opus|sonnet|haiku)-\d+(?:-\d{1,2})?\b")
+CLAUDE_TABLE_CHARS = 4000
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+MAX_BRIEF_BYTES = 16 * 1024
+SECRET = re.compile(
+    r"sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+)
+PROVIDER_FILES = {"anthropic": "CLAUDE.md", "openai": "AGENTS.md"}
+
+
+def die(message):
+    sys.exit("router: " + message)
+
+
+# ---------------------------------------------------------------- catalog
+
+def read_json(path, default):
+    return json.loads(path.read_text()) if path.exists() else default
+
+
+def load_catalog():
+    """The shared catalog, with the user's private notes and additions on top."""
+    models = {m["id"]: dict(m) for m in read_json(CATALOG, {"models": []})["models"]}
+    for m in read_json(LOCAL_CATALOG, {"models": []})["models"]:
+        models.setdefault(m["id"], {}).update(m)
+    return models
+
+
+def usable(model):
+    return model.get("status") in ("active", "trial")
+
+
+def cmd_models(args):
+    for m in load_catalog().values():
+        if usable(m) or args.all:
+            print("{}  [{}, {}]  {}".format(m["id"], m["provider"], m["status"], m.get("note", "")))
+
+
+def fetch_claude_ids():
+    """Returns the current models, then every model the page still names."""
+    request = urllib.request.Request(CLAUDE_MODELS_URL, headers={"User-Agent": "task-router"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        page = response.read().decode("utf-8", "replace")
+    table = page.find("Claude API ID")
+    current = set(CLAUDE_ID.findall(page[table:table + CLAUDE_TABLE_CHARS])) if table >= 0 else set()
+    if not current:
+        raise RuntimeError("no current models found on " + CLAUDE_MODELS_URL)
+    return current, set(CLAUDE_ID.findall(page))
+
+
+def fetch_codex_ids():
+    out = subprocess.run(["codex", "debug", "models"], capture_output=True, text=True, timeout=60, check=True)
+    ids = {m["slug"] for m in json.loads(out.stdout)["models"] if m.get("visibility") == "list"}
+    if not ids:
+        raise RuntimeError("codex listed no models")
+    return ids, ids
+
+
+def cmd_check_models(args):
+    """New models come in as trial; models their source no longer names are retired."""
+    data = read_json(CATALOG, {"models": []})
+    known = {m["id"]: m for m in data["models"]}
+    added, retired, returned, failed = [], [], [], []
+    for provider, fetch in (("anthropic", fetch_claude_ids), ("openai", fetch_codex_ids)):
+        try:
+            current, named = fetch()
+        except Exception as error:  # one source being down must not stop the other
+            failed.append("{}: {}".format(provider, error))
+            continue
+        for model_id in sorted(current - set(known)):
+            model = {"id": model_id, "provider": provider, "status": "trial", "note": "New, no results yet."}
+            data["models"].append(model)
+            known[model_id] = model
+            added.append(model_id)
+        for model in data["models"]:
+            if model["provider"] != provider:
+                continue
+            if model["status"] != "retired" and model["id"] not in named:
+                model["status"] = "retired"
+                retired.append(model["id"])
+            elif model["status"] == "retired" and model["id"] in current:
+                model["status"] = "trial"
+                returned.append(model["id"])
+    changed = added or retired or returned
+    if changed and args.write:
+        data["checked"] = dt.date.today().isoformat()
+        CATALOG.write_text(json.dumps(data, indent=2) + "\n")
+    print(json.dumps({"added": added, "retired": retired, "returned": returned, "failed": failed, "written": bool(changed and args.write)}, indent=2))
+    if failed:
+        sys.exit(1)
+    sys.exit(10 if changed else 0)
+
+
+def cmd_set_status(args):
+    data = read_json(CATALOG, {"models": []})
+    for model in data["models"]:
+        if model["id"] == args.model:
+            model["status"] = args.status
+            CATALOG.write_text(json.dumps(data, indent=2) + "\n")
+            print("{} is now {}".format(args.model, args.status))
+            return
+    die("no such model: " + args.model)
+
+
+# ---------------------------------------------------------------- launching
+
+def clean_env():
+    """Started from inside a Claude session, drop that session's own connection
+    settings so the new session uses the user's normal login."""
+    env = dict(os.environ)
+    if "CLAUDECODE" in env:
+        for name in list(env):
+            if name.startswith(("ANTHROPIC_", "CLAUDE_CODE_")) or name in ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"):
+                del env[name]
+    if direct_login():
+        for name in list(env):
+            if name.startswith("ANTHROPIC_"):
+                del env[name]
+    return env
+
+
+def direct_login():
+    """Set when the shell points Claude at a key or base URL the router should ignore."""
+    return read_json(CONFIG / "config.json", {}).get("direct_login", False)
+
+
+def git_root(cwd):
+    out = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return pathlib.Path(out.stdout.strip()) if out.returncode == 0 else None
+
+
+def project_blocks(cwd, provider):
+    """A project can refuse a provider in .router.json, for code that must not leave."""
+    root = git_root(cwd) or cwd
+    settings = read_json(root / ".router.json", {})
+    return provider in settings.get("blocked_providers", [])
+
+
+def rules_pointer(cwd, provider):
+    """Each CLI reads only its own rules file, so name the other one if it is alone."""
+    root = git_root(cwd) or cwd
+    own = root / PROVIDER_FILES[provider]
+    others = [name for name in PROVIDER_FILES.values() if (root / name).exists() and not own.exists()]
+    return "\n\nProject rules are in {}: read it first.".format(others[0]) if others else ""
+
+
+def build_command(model, effort, prompt, cwd, worktree, title, headless):
+    if model["provider"] == "anthropic":
+        command = ["claude", "--model", model["id"], "--effort", effort, "--name", title]
+        if worktree:
+            command += ["--worktree", worktree]
+        if headless:
+            command += ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"]
+        return command + [prompt]
+    if model["provider"] == "openai":
+        # The sandbox is set here on purpose: it overrides whatever the user's Codex config says.
+        base = ["-m", model["id"], "-c", 'model_reasoning_effort="{}"'.format(effort), "-s", "workspace-write", "-C", str(cwd)]
+        if worktree:
+            base.append("--worktree")
+        if headless:
+            return ["codex", "exec", "--skip-git-repo-check"] + base + [prompt]
+        return ["codex", "-a", "on-request"] + base + [prompt]
+    die("no launcher for provider {}; add one to build_command".format(model["provider"]))
+
+
+def new_terminal(command, cwd):
+    """Started from a tool with no terminal: open a window on macOS, else print."""
+    # A new window loads the shell profile again, so its settings must be dropped there too.
+    unset = "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL -u ANTHROPIC_MODEL " if direct_login() else ""
+    line = "cd {} && {}{}".format(shlex.quote(str(cwd)), unset, " ".join(shlex.quote(c) for c in command))
+    if sys.platform == "darwin" and shutil.which("osascript"):
+        script = 'tell application "Terminal" to do script {}'.format(json.dumps(line))
+        if subprocess.run(["osascript", "-e", script], capture_output=True).returncode == 0:
+            print("Opened a new Terminal window.")
+            return
+    print("Run this in a terminal:\n" + line)
+
+
+def cmd_start(args):
+    """Open the talk-it-through session on the router's own model."""
+    if sys.platform != "win32" and not sys.stdin.isatty():
+        die("run this in a terminal")
+    os.execvpe("claude", ["claude", "--model", args.model, "--name", "router",
+                          "--append-system-prompt", skill_without(None), " ".join(args.task)], clean_env())
+
+
+def cmd_doctor(args):
+    """Make one tiny call through each CLI, the way a launch would."""
+    checks = {
+        "claude": ["claude", "-p", "--model", "claude-haiku-5-5", "--no-session-persistence", "--strict-mcp-config", "Reply with OK."],
+        "codex": ["codex", "exec", "--skip-git-repo-check", "-m", "gpt-6-luna", "-s", "read-only", "Reply with OK."],
+    }
+    failed = False
+    for name, command in checks.items():
+        with tempfile.TemporaryDirectory() as empty:
+            out = subprocess.run(command, cwd=empty, env=clean_env(), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+        working = out.returncode == 0 and "OK" in out.stdout
+        failed = failed or not working
+        print("{}: {}".format(name, "works" if working else "FAILED: " + (out.stdout + out.stderr).strip()[-300:]))
+    sys.exit(1 if failed else 0)
+
+
+def plan_route(args):
+    """Check everything a launch must check, then work out the route. Starts nothing."""
+    models = load_catalog()
+    model = models.get(args.model)
+    if not model or not usable(model):
+        die("{} is not an active or trial model; see `router models`".format(args.model))
+    if args.effort not in EFFORTS:
+        die("effort must be one of " + ", ".join(sorted(EFFORTS)))
+    cwd = pathlib.Path(args.cwd).expanduser().resolve()
+    if project_blocks(cwd, model["provider"]):
+        die("this project blocks {} in .router.json".format(model["provider"]))
+    brief = pathlib.Path(args.brief).read_text()
+    if len(brief.encode()) > MAX_BRIEF_BYTES:
+        die("brief is over {} KB; point to files instead of pasting them".format(MAX_BRIEF_BYTES // 1024))
+    if SECRET.search(brief):
+        die("brief appears to contain a secret; remove it")
+    is_git = git_root(cwd) is not None
+    return {
+        "id": uuid.uuid4().hex[:8], "model": model, "cwd": cwd, "brief": brief, "is_git": is_git,
+        "worktree": is_git and not args.no_worktree,
+    }
+
+
+def log_route(args, plan, via):
+    STATE.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a") as log:
+        log.write(json.dumps({
+            "id": plan["id"], "when": dt.datetime.now().isoformat(timespec="seconds"), "project": str(plan["cwd"]),
+            "title": args.title, "model": plan["model"]["id"], "provider": plan["model"]["provider"],
+            "trial": plan["model"]["status"] == "trial", "effort": args.effort, "reason": args.reason,
+            "isolated": plan["worktree"], "via": via,
+        }) + "\n")
+    print("Route {}: {} at {} effort".format(plan["id"], plan["model"]["id"], args.effort))
+    if not plan["is_git"]:
+        print("Not a git repo, so this session shares the folder. Don't run a second writer here.")
+
+
+def cmd_record(args):
+    """Log a route that the caller starts itself, as an app session. Launches nothing."""
+    plan = plan_route(args)
+    if plan["model"]["provider"] != "anthropic":
+        die("only Claude models can start as an app session; use `router launch` for {}".format(plan["model"]["id"]))
+    log_route(args, plan, "app")
+    print("Start it with use_worktree={}, cwd {}.".format(str(plan["worktree"]).lower(), plan["cwd"]))
+    pointer = rules_pointer(plan["cwd"], "anthropic").strip()
+    if pointer:
+        print("End the prompt with: " + pointer)
+
+
+def cmd_launch(args):
+    plan = plan_route(args)
+    model, cwd = plan["model"], plan["cwd"]
+    worktree = "route-" + plan["id"] if plan["worktree"] else None
+    prompt = plan["brief"] + rules_pointer(cwd, model["provider"])
+    command = build_command(model, args.effort, prompt, cwd, worktree, args.title, args.headless)
+
+    if args.dry_run:
+        print(json.dumps({"route": plan["id"], "cwd": str(cwd), "command": command}, indent=2))
+        return
+    log_route(args, plan, "terminal")
+    sys.stdout.flush()
+    if args.headless:
+        sys.exit(subprocess.run(command, cwd=cwd, env=clean_env(), stdin=subprocess.DEVNULL).returncode)
+    if sys.stdin.isatty():
+        os.chdir(cwd)
+        os.execvpe(command[0], command, clean_env())
+    new_terminal(command, cwd)
+
+
+# ---------------------------------------------------------------- outcomes
+
+def read_log():
+    if not LOG.exists():
+        return []
+    return [json.loads(line) for line in LOG.read_text().splitlines() if line.strip()]
+
+
+def cmd_outcome(args):
+    routes = read_log()
+    if not any(r["id"] == args.id for r in routes):
+        die("no such route: " + args.id)
+    for route in routes:
+        if route["id"] == args.id:
+            route.update(outcome=args.result, note=args.note, fault=args.fault)
+    LOG.write_text("".join(json.dumps(r) + "\n" for r in routes))
+    print("Recorded.")
+
+
+def cmd_pending(args):
+    """The oldest unrated routes that have had at least a day to finish."""
+    cutoff = dt.datetime.now() - dt.timedelta(days=1)
+    waiting = [r for r in read_log() if "outcome" not in r and dt.datetime.fromisoformat(r["when"]) < cutoff]
+    for route in waiting[: args.limit]:
+        print("{id}  {model}  {title}  ({when})".format(**route))
+
+
+def cmd_stats(args):
+    table = {}
+    for route in read_log():
+        row = table.setdefault(route["model"], {"routes": 0, "accepted": 0, "rework": 0, "rejected": 0, "unrated": 0})
+        row["routes"] += 1
+        row[route.get("outcome", "unrated")] += 1
+    print(json.dumps(table, indent=2))
+
+
+def cmd_addback(args):
+    """A removed instruction is a candidate to return once its fault repeats in two sessions."""
+    routes = read_log()
+    for item in read_json(REMOVED, []):
+        hits = {r["id"] for r in routes if r.get("fault") == item["id"] and r["when"][:10] > item["removed"]}
+        state = "ADD BACK?" if len(hits) >= 2 else ("watching" if hits else "quiet")
+        print("{}: {} ({} sessions)".format(item["id"], state, len(hits)))
+
+
+# ---------------------------------------------------------------- evals
+
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string", "enum": ["ask", "route"],
+            "description": "route: you are ready to show the card and only need the user's yes. ask: you first need an answer or a decision from the user.",
+        },
+        "questions": {
+            "type": "array", "items": {"type": "string"},
+            "description": "Questions you need answered before the card. Leave out the yes on the card itself.",
+        },
+        "objection": {"type": ["string", "null"], "description": "Your objection or better approach, if you have one"},
+        "model": {"type": ["string", "null"]},
+        "effort": {"type": ["string", "null"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["action", "questions", "objection", "model", "effort", "reason"],
+}
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {"raised": {"type": "boolean"}},
+    "required": ["raised"],
+}
+
+
+def instructions(text):
+    """Split the skill into its numbered instructions and everything else."""
+    body = text.split("---", 2)[2]
+    return re.findall(r"^\d+\. .*$", body, flags=re.M), body
+
+
+def skill_without(number):
+    _, body = instructions(SKILL.read_text())
+    body = body.replace("Task: $ARGUMENTS", "")
+    if number is None:
+        return body
+    return re.sub(r"^{}\. .*\n".format(number), "", body, flags=re.M)
+
+
+def run_claude(model, system, user, schema, budget):
+    command = [
+        "claude", "-p", "--model", model, "--no-session-persistence", "--output-format", "json",
+        "--setting-sources", "project", "--strict-mcp-config", "--tools", "", "--system-prompt", system,
+        "--json-schema", json.dumps(schema), "--max-budget-usd", str(budget), user,
+    ]
+    with tempfile.TemporaryDirectory() as empty:
+        out = subprocess.run(command, cwd=empty, env=clean_env(), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
+    reply = json.loads(out.stdout)
+    return reply.get("structured_output") or {}, float(reply.get("total_cost_usd") or 0)
+
+
+def score_case(case, reply, judge_model, budget):
+    checks = {"action": reply.get("action") == case["action"]}
+    cost = 0.0
+    if case["action"] == "route":
+        checks["model"] = reply.get("model") in case["models"]
+    if case.get("objection"):
+        # A model judges this one, because an objection can be worded any number of ways.
+        verdict, cost = run_claude(
+            judge_model,
+            "Answer whether the reply raises the given concern, in any wording, in its objection, questions or reason.",
+            "Concern: {}\n\nReply: {}".format(case["objection"], json.dumps(reply)),
+            JUDGE_SCHEMA, budget,
+        )
+        checks["objection"] = bool(verdict.get("raised"))
+    return checks, cost
+
+
+def run_arm(model, system, cases, judge_model, budget, workers):
+    catalog = "\n".join(
+        "{id} [{provider}, {status}] {note}".format(**m) for m in load_catalog().values() if usable(m)
+    )
+
+    def one(case):
+        user = "`router pending` prints nothing.\n`router models` prints:\n{}\n\nProject facts, which is everything looking in the project would tell you: {}\n\nThe user says: {}\n\nGive your next move.".format(
+            catalog, case.get("facts", "none"), case["task"])
+        try:
+            reply, cost = run_claude(model, system, user, SCHEMA, budget)
+            checks, judge_cost = score_case(case, reply, judge_model, budget)
+            return {"id": case["id"], "checks": checks, "reply": reply, "cost": cost + judge_cost}
+        except Exception as error:
+            return {"id": case["id"], "checks": {"error": False}, "reply": {"error": str(error)}, "cost": 0.0}
+
+    with futures.ThreadPoolExecutor(workers) as pool:
+        return list(pool.map(one, cases))
+
+
+def summarize(results):
+    totals = {}
+    for result in results:
+        for name, passed in result["checks"].items():
+            row = totals.setdefault(name, [0, 0])
+            row[0] += int(passed)
+            row[1] += 1
+    return {
+        "questions_per_case": round(sum(len(r["reply"].get("questions") or []) for r in results) / max(len(results), 1), 1),
+        "all_passed": sum(all(r["checks"].values()) for r in results),
+        "cases": len(results),
+        "checks": {name: "{}/{}".format(*row) for name, row in totals.items()},
+        "cost_usd": round(sum(r["cost"] for r in results), 2),
+    }
+
+
+def write_report(name, payload):
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    path = REPORTS / "{}-{}.json".format(dt.date.today().isoformat(), name)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return path
+
+
+def cmd_eval(args):
+    """Compare candidate router models on the saved cases."""
+    cases = read_json(CASES, [])
+    per_arm = args.max_usd / max(len(args.models), 1)
+    budget = max(per_arm / max(len(cases), 1), 0.05)
+    arms, summary = {}, {}
+    for model in args.models:
+        arms[model] = run_arm(model, skill_without(None), cases, args.judge, budget, args.workers)
+        summary[model] = summarize(arms[model])
+    path = write_report("eval", {"summary": summary, "arms": arms})
+    print(json.dumps(summary, indent=2))
+    print("Report: {}".format(path))
+
+
+def cmd_audit(args):
+    """Test each instruction by removing it. Proposes only; never edits the skill."""
+    cases = read_json(CASES, [])
+    lines, _ = instructions(SKILL.read_text())
+    budget = max(args.max_usd / max((len(lines) + 1) * len(cases), 1), 0.05)
+    full = run_arm(args.model, skill_without(None), cases, args.judge, budget, args.workers)
+    summary = {"full": summarize(full)}
+    proposals = []
+    for index, line in enumerate(lines, 1):
+        arm = summarize(run_arm(args.model, skill_without(index), cases, args.judge, budget, args.workers))
+        summary["without {}".format(index)] = arm
+        if arm["all_passed"] >= summary["full"]["all_passed"]:
+            proposals.append(line)
+    path = write_report("audit", {"model": args.model, "summary": summary, "proposed_removals": proposals})
+    print(json.dumps({"summary": summary, "proposed_removals": proposals}, indent=2))
+    print("Report: {}".format(path))
+    print("Nothing was changed. Each removal needs the owner's yes.")
+
+
+# ---------------------------------------------------------------- command line
+
+def route_flags(p):
+    p.add_argument("--title", required=True)
+    p.add_argument("--model", required=True)
+    p.add_argument("--effort", default="medium")
+    p.add_argument("--reason", required=True)
+    p.add_argument("--brief", required=True)
+    p.add_argument("--cwd", default=".")
+    p.add_argument("--no-worktree", action="store_true")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="router", description=__doc__.splitlines()[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    p = commands.add_parser("models", help="list models the router may choose")
+    p.add_argument("--all", action="store_true")
+    p.set_defaults(run=cmd_models)
+
+    p = commands.add_parser("start", help="talk a task through on the router's model")
+    p.add_argument("task", nargs="*")
+    p.add_argument("--model", default="claude-sonnet-5-5")
+    p.set_defaults(run=cmd_start)
+
+    p = commands.add_parser("launch", help="start a new session in a terminal")
+    route_flags(p)
+    p.add_argument("--headless", action="store_true", help="run without a terminal and print the result")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(run=cmd_launch)
+
+    p = commands.add_parser("record", help="check and log a route the caller starts itself as an app session")
+    route_flags(p)
+    p.set_defaults(run=cmd_record)
+
+    p = commands.add_parser("outcome", help="record how a route went")
+    p.add_argument("id")
+    p.add_argument("result", choices=["accepted", "rework", "rejected"])
+    p.add_argument("--note", default="")
+    p.add_argument("--fault", default=None, help="id of a removed instruction this failure points to")
+    p.set_defaults(run=cmd_outcome)
+
+    p = commands.add_parser("pending", help="routes with no outcome yet")
+    p.add_argument("--limit", type=int, default=1)
+    p.set_defaults(run=cmd_pending)
+
+    commands.add_parser("doctor", help="check that both CLIs can make a call").set_defaults(run=cmd_doctor)
+    commands.add_parser("stats", help="results by model").set_defaults(run=cmd_stats)
+    commands.add_parser("addback", help="removed instructions whose fault returned").set_defaults(run=cmd_addback)
+
+    p = commands.add_parser("check-models", help="compare the catalog with the providers (exit 10 = changed)")
+    p.add_argument("--write", action="store_true")
+    p.set_defaults(run=cmd_check_models)
+
+    p = commands.add_parser("set-status", help="promote or retire a model (the owner's call)")
+    p.add_argument("model")
+    p.add_argument("status", choices=["active", "trial", "retired"])
+    p.set_defaults(run=cmd_set_status)
+
+    p = commands.add_parser("eval", help="compare router models on the saved cases")
+    p.add_argument("--models", nargs="+", required=True)
+    p.add_argument("--judge", default="claude-sonnet-5-5")
+    p.add_argument("--max-usd", type=float, default=5)
+    p.add_argument("--workers", type=int, default=6)
+    p.set_defaults(run=cmd_eval)
+
+    p = commands.add_parser("audit", help="test each instruction by removing it")
+    p.add_argument("--model", default="claude-sonnet-5-5")
+    p.add_argument("--judge", default="claude-sonnet-5-5")
+    p.add_argument("--max-usd", type=float, default=15)
+    p.add_argument("--workers", type=int, default=6)
+    p.set_defaults(run=cmd_audit)
+
+    args = parser.parse_args()
+    args.run(args)
+
+
+if __name__ == "__main__":
+    main()

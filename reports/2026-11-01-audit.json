@@ -1,0 +1,69 @@
+{
+  "model": "claude-sonnet-5-5",
+  "summary": {
+    "full": {
+      "questions_per_case": 1.0,
+      "all_passed": 29,
+      "cases": 30,
+      "checks": {
+        "action": "29/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    },
+    "without 1": {
+      "questions_per_case": 1.4,
+      "all_passed": 28,
+      "cases": 30,
+      "checks": {
+        "action": "28/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    },
+    "without 2": {
+      "questions_per_case": 1.1,
+      "all_passed": 29,
+      "cases": 30,
+      "checks": {
+        "action": "29/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    },
+    "without 3": {
+      "questions_per_case": 1.1,
+      "all_passed": 28,
+      "cases": 30,
+      "checks": {
+        "action": "28/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    },
+    "without 4": {
+      "questions_per_case": 0.9,
+      "all_passed": 29,
+      "cases": 30,
+      "checks": {
+        "action": "29/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    },
+    "without 5": {
+      "questions_per_case": 1.2,
+      "all_passed": 28,
+      "cases": 30,
+      "checks": {
+        "action": "28/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    }
+  },
+  "proposed_removals": [
+    "2. If you see a flaw, a better approach or a reason not to do it, say so plainly with your reason. The user has the final word.",
+    "4. Show a short card: your understanding, what is in and out of scope, what done means, the model, the effort and why. Launch only after the user says yes."
+  ]
+}

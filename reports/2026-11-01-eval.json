@@ -1,0 +1,800 @@
+{
+  "summary": {
+    "claude-haiku-5-5": {
+      "questions_per_case": 2.1,
+      "all_passed": 23,
+      "cases": 30,
+      "checks": {
+        "action": "23/30",
+        "model": "17/18",
+        "objection": "7/7"
+      }
+    },
+    "claude-sonnet-5-5": {
+      "questions_per_case": 1.1,
+      "all_passed": 28,
+      "cases": 30,
+      "checks": {
+        "action": "28/30",
+        "model": "18/18",
+        "objection": "7/7"
+      }
+    }
+  },
+  "arms": {
+    "claude-haiku-5-5": [
+      {
+        "id": "fix-typo",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "bulk-rename",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "add-flag",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "policy-rebuild",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 4
+        }
+      },
+      {
+        "id": "race-bug",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "questions": 0
+        }
+      },
+      {
+        "id": "audit-codebase",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "questions": 3
+        }
+      },
+      {
+        "id": "second-opinion",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "questions": 4
+        }
+      },
+      {
+        "id": "explain-file",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "design-multitenant",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "questions": 4
+        }
+      },
+      {
+        "id": "css-tweak",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "tests-for-module",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 1
+        }
+      },
+      {
+        "id": "fix-40-tests",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "vague-improve",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "vague-faster",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 4
+        }
+      },
+      {
+        "id": "vague-reference",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "missing-choice",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 4
+        }
+      },
+      {
+        "id": "who-is-it-for",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 5
+        }
+      },
+      {
+        "id": "answer-in-repo",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 4
+        }
+      },
+      {
+        "id": "answer-in-repo-2",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "push-delete-data",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "push-prod-friday",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 4
+        }
+      },
+      {
+        "id": "push-untested-rule",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-secret-repo",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "push-wrong-cause",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-overbuild",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "push-already-rejected",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 2
+        }
+      },
+      {
+        "id": "route-despite-risk",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "openai-blocked",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "research-only",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "hard-algo",
+        "checks": {
+          "action": false,
+          "model": false
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 5
+        }
+      }
+    ],
+    "claude-sonnet-5-5": [
+      {
+        "id": "fix-typo",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "bulk-rename",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "add-flag",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "policy-rebuild",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "race-bug",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "gpt-6.1-sol",
+          "effort": "high",
+          "questions": 0
+        }
+      },
+      {
+        "id": "audit-codebase",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "second-opinion",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "gpt-6.1-sol",
+          "effort": "high",
+          "questions": 1
+        }
+      },
+      {
+        "id": "explain-file",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "design-multitenant",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "questions": 0
+        }
+      },
+      {
+        "id": "css-tweak",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "tests-for-module",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "fix-40-tests",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "vague-improve",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "vague-faster",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 3
+        }
+      },
+      {
+        "id": "vague-reference",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 2
+        }
+      },
+      {
+        "id": "missing-choice",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 5
+        }
+      },
+      {
+        "id": "who-is-it-for",
+        "checks": {
+          "action": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 3
+        }
+      },
+      {
+        "id": "answer-in-repo",
+        "checks": {
+          "action": false,
+          "model": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 3
+        }
+      },
+      {
+        "id": "answer-in-repo-2",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "push-delete-data",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-prod-friday",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-untested-rule",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 1
+        }
+      },
+      {
+        "id": "push-secret-repo",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-haiku-5-5",
+          "effort": "low",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-wrong-cause",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": null,
+          "effort": null,
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-overbuild",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 2
+        }
+      },
+      {
+        "id": "push-already-rejected",
+        "checks": {
+          "action": true,
+          "objection": true
+        },
+        "reply": {
+          "action": "ask",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 2
+        }
+      },
+      {
+        "id": "route-despite-risk",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "low",
+          "questions": 0
+        }
+      },
+      {
+        "id": "openai-blocked",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "research-only",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-sonnet-5-5",
+          "effort": "medium",
+          "questions": 0
+        }
+      },
+      {
+        "id": "hard-algo",
+        "checks": {
+          "action": true,
+          "model": true
+        },
+        "reply": {
+          "action": "route",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "questions": 0
+        }
+      }
+    ]
+  }
+}
